@@ -1,0 +1,327 @@
+
+options(stringsAsFactors = FALSE)
+
+library(vioplot)
+
+hist.exp <- read.csv("results/hist_exp_plus_rawexpvalues.csv")
+
+NS.K4 <- intersect(which(hist.exp[,"NS_K4"]!="<NA>"), which(is.na(hist.exp[,"NS_K27"])))
+NS.K27 <- intersect(which(hist.exp[,"NS_K27"]!="<NA>"), which(is.na(hist.exp[,"NS_K4"])))
+
+N.K4 <- intersect(which(hist.exp[,"N_K4"]!="<NA>"), which(is.na(hist.exp[,"N_K27"])))
+N.K27 <- intersect(which(hist.exp[,"N_K27"]!="<NA>"), which(is.na(hist.exp[,"N_K4"])))
+
+NS.K4.exp <- hist.exp[NS.K4,"NS"]
+NS.K27.exp <- hist.exp[NS.K27,"NS"]
+
+N.K4.exp <- hist.exp[N.K4,"N"]
+N.K27.exp <- hist.exp[N.K27,"N"]
+
+NS <- intersect(which(is.na(hist.exp[,"NS_K4"])),which(is.na(hist.exp[,"NS_K27"])))
+N <-  intersect(which(is.na(hist.exp[,"N_K4"])),which(is.na(hist.exp[,"N_K27"])))
+
+NS.exp <- hist.exp[NS,"N"]
+N.exp <- hist.exp[N,"N"]
+
+names <- c("NSC K4me3","Neuron K4me3","NSC K27me3", "Neuron H3K27me3", "NSC Neither", "Neuron Neither") 
+
+postscript("results/boxplot_exp_vs_hist.ps")
+boxplot(NS.K4.exp,N.K4.exp,NS.K27.exp,N.K27.exp,NS.exp,N.exp,
+		names = names,
+		ylab = "Raw Gene Expression Level",
+		outline = FALSE
+)
+
+dev.off()
+
+#####################################################################################
+
+#try plotting gene expression levels vs peak significance
+
+hist.all <- read.csv("results/expression_histones_all.csv")
+
+res <- cbind(hist.all[,c(2,4,11,15,28,46,64,82)],hist.exp[,14:15])
+
+#remove NAs
+res[is.na(res)]<-0.1
+
+NS_K4.cor <- res[intersect(which(!is.na(res[,"NS_K4_rd.values.FoldEnrichment"])),which(res[,"NS"]>8)),]
+N_K4.cor <- res[intersect(which(!is.na(res[,"N_K4_rd.values.FoldEnrichment"])),which(res[,"N"]>8)),]
+
+postscript("results/NS_K4_vs_exp.ps", width=12,height=12,horizontal=FALSE)
+plot(NS_K4.cor2[,"NS_K4_rd.values.FoldEnrichment"],NS_K4.cor2[,"NS"],
+	pch = ".",
+	main = "H3K4me3 Peak Significance vs Gene Expression",
+	xlab = "Fold Enrichment",
+	ylab = "Gene Expression"
+	)
+abline(fit,col="red", lwd = 3)
+dev.off()
+
+##try to plot regression line on, but have infinite values as must have been neg values before
+#remove for the time being
+
+N_K4.cor2 <- N_K4.cor[which(N_K4.cor[,"N_K4_rd.values.FoldEnrichment"]!="Inf"),]
+
+fit <- lsfit(NS_K4.cor2[,"NS_K4_rd.values.FoldEnrichment"],NS_K4.cor2[,"NS"])
+
+fit$coefficients
+
+abline(fit,col="blue")
+
+##################################################################################################
+
+#density plot of FDR values to fit some vague lie about how i chose a p value...
+
+peak.K4 <- read.csv("MLA_NS_H3K4me3_CMN054_s_2_export_sorted_nodups-W200-G200-islands-summary", sep="\t")
+peak.K27 <- read.csv("../SICER_MLA_H3K27me3/MLA_NS_H3K27me3_CMN056_s_4_export_sorted_nodups-W200-G600-islands-summary", sep="\t")
+
+
+colnames(peak.K4) <- c("Chr", "Start", "End", "nTags_ChIP", "nTags_Cnt", "PValue", "FoldEnrichment", "FDR")
+colnames(peak.K27) <- c("Chr", "Start", "End", "nTags_ChIP", "nTags_Cnt", "PValue", "FoldEnrichment", "FDR")
+
+postscript("../p_val_cutoff.ps",horizontal=FALSE)
+plot(density(-log(peak.K27[,"FDR"])),
+	lwd = "2",
+	xlab = "-log(FDR)",
+	ylab = "Peak Density",
+	main = ""
+	)
+
+lines(col = "blue",lwd="2",density(-log(peak.K4[,"FDR"])))
+
+abline(v=-log(1e-30),lwd="3",lty="dotted",col="green")
+abline(v=-log(3e-08),lwd="3",lty="dotted",col="red")
+dev.off()
+
+text(-log(1e-40),0.013,"1e-30",cex="0.8")
+abline(v=-log(3e-08),lwd="1",col="red")
+text(-log(3e-18),0.014,"3e-08",cex="0.8")
+
+dev.off()
+
+####################################################################################################
+#attempt to replot K4 peak height vs expression level
+#take all peaks and match to all expression values then plot that instead - maybe remove outliers?
+
+data <- read.csv("results/SICER_MLA_H3K4me3/MLA_NS_H3K4me3_CMN054_s_2_export_sorted_nodups-W200-G200-islands-summary",sep="\t",comment.char = "#")
+
+colnames(data) <- c("Chr", "Start", "End", "nTags_ChIP", "nTags_Cnt", "PValue", "FoldEnrichment", "FDR")
+
+##calculate neg10 log pvalues
+log <- -10*(log10(data[,"PValue"]))
+
+##calculate length of peak
+length <- data[,"End"] - data[,"Start"]
+
+##add to dataframe
+data_out <- data.frame(data,log, length)
+colnames(data_out) <- c("Chr", "Start", "End", "nTags_ChIP", "nTags_Cnt", "PValue", "FoldEnrichment", "FDR", "neg10log10pVal", "Length")
+
+
+values <-  c("Length", "nTags_ChIP", "nTags_Cnt", "neg10log10pVal", "FDR", "FoldEnrichment")
+
+#sometimes they have FDR
+if(ncol(data)==9){
+  colnames(data)[9] <- "FDR"
+  values<-c(values,"FDR")
+}
+
+#we have to give them names to avoid a bug in ChIPpeakAnnot if we want to use it later
+data_out[,"Name"]<-paste(paste(data_out[,"Chr"],data_out[,"Start"],sep=":"),data_out[,"End"], sep="-")
+
+library(IRanges)
+
+#note - this fails if chr position is undefined, which can happen
+#if we've mapped over from somewhere else, so:
+ids <- which(is.na(data[,"Chr"]) | is.na(data[,"Start"]) | is.na(data[,"End"]) )
+if(length(ids)>0){
+  data <- data[-ids,]
+}
+
+rd <- RangedData(ranges = IRanges(
+                   start= data_out$Start,
+                   end = data_out$End,
+                   names = as.character(data_out$Name),
+                   ),
+                 space = as.character(data_out$Chr),
+                 values = data_out[,values]
+                 )
+
+library(ChIPpeakAnno)
+library(biomaRt)
+#ensmart <- useMart("ensembl", dataset="mmusculus_gene_ensembl")
+
+
+#load mouse transcripts
+data(TSS.mouse.NCBIM37)
+
+#The chromosomes names used in teh NCBIM37 dataset are 1..Y, MT and
+#various NT_***** non-standard chrs. 
+
+                                        #remove "chr" prefix for  ChIPpeakAnno
+names(rd)<-gsub("chr","",names(rd))
+
+#change "M" to "MT" for ChIPpeakAnno
+id<-which(names(rd)=="M")
+if (length(id)>0){
+   names(rd)[id]<-"MT"
+}
+
+#chippeakanno discards anything in values, so hang on to them
+#vals <- as.data.frame(rd)
+#vals <- vals[,grep("values.", colnames(vals), value=T)]
+#colnames(vals) <- gsub('values.','',colnames(vals))
+
+
+# NOTE: TSS.mouse.NCBIM37 is actually *gene* start and end positions,
+# not individual transcripts.
+
+#get the most recent annotation data from ensembl
+#tss <- getAnnotation(ensmart, "TSS")
+#save(tss, file="tss.RData")
+tss <- get(load("results/tss.RData"))
+
+#convert tss data to a dataframe and then split into two to give strandedness
+tss.df <- as.data.frame(tss)
+tss.pos <- tss.df[which(tss.df[,"strand"]==1),]
+tss.neg <- tss.df[which(tss.df[,"strand"]==-1),]
+tss.pos <- RangedData(tss.pos)
+tss.neg <- RangedData(tss.neg)
+
+
+#and later we'll want to know if it overlaps a coding region?
+#exons <- getAnnotation(ensmart, "Exon")
+#save(exons, file="exons.RData")
+#exons <- get(load("exons.RData"))
+
+#rd.df <- data.frame(rd)
+
+
+#### try findOverlaps function instead as ChIPPeakAnno is a big pile of arse
+#find overlaps on the positive strand
+
+overlapping.tss.pos <- findOverlaps(rd,tss.pos)
+overlapping.tss.neg <- findOverlaps(rd,tss.neg)
+
+#turn everything into dataframe
+rd.df <- as.data.frame(rd)
+tss.pos.df <- as.data.frame(tss.pos)
+tss.neg.df <- as.data.frame(tss.neg)
+
+##process positive and negative separately and combine back together at the end somehow.
+
+tss.olmatrix.pos <- as.matrix(overlapping.tss.pos)
+tss.olmatrix.neg <- as.matrix(overlapping.tss.neg)
+
+rd.ind.pos <- tss.olmatrix.pos[,1]
+rd.ind.neg <- tss.olmatrix.neg[,1]
+tss.ind.pos <- tss.olmatrix.pos[,2]
+tss.ind.neg <- tss.olmatrix.neg[,2]
+
+rd.ol.pos <- rd.df[rd.ind.pos,]
+colnames(rd.ol.pos) <- paste("rd", colnames(rd.df), sep=".")
+
+rd.ol.neg <- rd.df[rd.ind.neg,]
+colnames(rd.ol.neg) <- paste("rd", colnames(rd.df), sep=".")
+
+tss.pos.ol<-tss.pos.df[tss.ind.pos,]
+colnames(tss.pos.ol) <- paste("tss", colnames(tss.pos.df), sep=".")
+
+tss.neg.ol<-tss.neg.df[tss.ind.neg,]
+colnames(tss.neg.ol) <- paste("tss", colnames(tss.neg.df), sep=".")
+
+#combine rd.ol and tss data
+res.pos <- cbind(rd.ol.pos, tss.pos.ol)
+inds.pos <- intersect(which(res.pos[,"tss.start"] > res.pos[,"rd.start"]), which(res.pos[,"rd.end"] > res.pos[,"tss.start"]))
+res.pos<-res.pos[inds.pos,]
+
+res.neg <- cbind(rd.ol.neg, tss.neg.ol)
+inds.neg <- intersect(which(res.neg[,"tss.end"] > res.neg[,"rd.start"]), which(res.neg[,"rd.end"] > res.neg[,"tss.end"]))
+res.neg<-res.neg[inds.neg,]
+
+#stick tables together
+peaks <- rbind(res.pos, res.neg)
+
+
+library(beadarray)
+library(limma)
+library(biomaRt)
+library(illuminaMousev2BeadID.db)
+
+BSData <- get(load("data/BSData.quantile.RData"))
+E <- exprs(BSData)
+
+ids = rownames(E)
+symbol <- mget(ids, illuminaMousev2BeadIDSYMBOL, ifnotfound = NA)
+sum(sapply(symbol, length) > 1)
+symbol <- as.character(symbol)
+length(which(symbol=="NA"))
+
+ensembl = mget(ids, illuminaMousev2BeadIDENSEMBL, ifnotfound = NA)
+length(which(is.na(ensembl)))
+
+sum(sapply(ensembl, length) > 1)
+crosshyb <- which(( sapply(ensembl, length) ) > 1) 
+length(crosshyb)
+ensembl[crosshyb] <- NA 
+ensembl <- as.character(ensembl)
+ensembl[ensembl=="NA"] = NA
+length(which(is.na(ensembl)))
+
+##########make averages for NS and N - use apply function - before just stuck in excel as for loops didnt work
+NS.avg <-integer(dim(E)[1])
+
+ns.cols <- grep("NS", colnames(E))
+n.cols  <- grep("N[^S]", colnames(E)) 
+
+aves <- apply(E, 1, function(x){  
+    NS.ave  <- sum(x[ns.cols])/length(ns.cols)
+    N.ave   <- sum(x[n.cols])/length(n.cols)
+    return(c(NS.ave, N.ave))
+ }
+)
+
+aves <- t(aves)
+colnames(aves)<-c("NS.ave", "N.ave")
+
+
+###add back to E to give ensembl ids and raw expression values
+
+anno <- data.frame(
+                   ID = as.character(ids),
+                   EnsemblID = ensembl,
+                   symbol=symbol,
+                   E[,1:8],
+                   stringsAsFactors=F
+              )
+
+EnsemblID <- anno[,"EnsemblID"]
+rownames(EnsemblID) <- ids
+NS <- as.factor(aves[,1])
+N <- as.factor(aves[,2])
+
+ave <- cbind(EnsemblID,NS,N)
+colnames(ave) <- c("EnsemblID","NS","N")
+
+#####something here is fucked.....take the averaged expressions from 
+
+exp <- read.csv("results/hist_exp_plus_rawexpvalues.csv")
+exp <- exp[,c("EnsemblID","NS","N")
+
+merge <- merge(peaks, exp, by.x="tss.names", by.y="EnsemblID")
+
+postscript("results/hist_vs_exp_allpeaks.ps", horizontal=FALSE)
+plot(log10(merge[,"rd.values.FoldEnrichment"]),merge[,"NS"],
+		pch=".",
+		main="",
+		xlab="Fold Enrichment",
+		ylab="Gene Expression"
+		)
+abline(v=0.75, lwd="3", lty = "dotted", col="red")
+abline(h=3, lwd="3", lty = "dotted", col="red")
+
+dev.off()
+
+
+

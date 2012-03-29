@@ -1,0 +1,465 @@
+
+options(stringsAsFactors = FALSE)
+
+library(beadarray)
+library(limma)
+library(biomaRt)
+library(illuminaMousev2BeadID.db)
+
+hist.exp <- read.csv(file = "results/expression_histones_all.csv")
+
+BSData <- get(load("../mla_neurons_lumixpn/results/BSData.quantile.RData"))
+E <- exprs(BSData)
+
+####add Ensembl IDs to E as something wierd is happening....
+
+ids = rownames(E)
+symbol <- mget(ids, illuminaMousev2BeadIDSYMBOL, ifnotfound = NA)
+sum(sapply(symbol, length) > 1)
+symbol <- as.character(symbol)
+length(which(symbol=="NA"))
+
+ensembl = mget(ids, illuminaMousev2BeadIDENSEMBL, ifnotfound = NA)
+length(which(is.na(ensembl)))
+
+sum(sapply(ensembl, length) > 1)
+crosshyb <- which(( sapply(ensembl, length) ) > 1) 
+length(crosshyb)
+ensembl[crosshyb] <- NA 
+ensembl <- as.character(ensembl)
+ensembl[ensembl=="NA"] = NA
+length(which(is.na(ensembl)))
+
+####make averages for NS and N
+
+NS.avg <-integer(dim(E)[1])
+
+ns.cols <- grep("NS", colnames(E))
+n.cols  <- grep("N[^S]", colnames(E)) 
+
+aves <- apply(E, 1, function(x){  
+    NS.ave  <- sum(x[ns.cols])/length(ns.cols)
+    N.ave   <- sum(x[n.cols])/length(n.cols)
+    return(c(NS.ave, N.ave))
+ }
+)
+
+aves <- t(aves)
+colnames(aves)<-c("NS.ave", "N.ave")
+
+####to put on right scale - minus minimum value
+
+min.NS <- min(aves[,"NS.ave"])
+min.N <- min(aves[,"N.ave"])
+
+aves.zero <- as.data.frame(apply(aves, 1, function(x){
+		NS.zero <- x["NS.ave"] - min.NS
+		N.zero	<- x["N.ave"] - min.N
+		return(c(NS.zero,N.zero))
+		}
+	)
+	)
+
+aves.zero <- t(aves.zero)
+
+####merge with histone data by EnsemblID
+
+#tidy up first
+
+rm.cols <- c("X","ensembl_gene_id","AveExpr","t","B","NS_K4_X","NS_K27_X","N_K4_X","N_K27_X")
+
+hist <- hist.exp[,which(!(colnames(hist.exp) %in% rm.cols))]
+
+res <- merge(aves.zero,hist, by.x = "row.names", by.y = "ID")
+
+colnames(res)[1] <- "ID"
+
+#quick plot
+
+#plot(log(res[,"NS_K4_rd.values.FoldEnrichment"]), res[,"NS.ave"])
+
+####separate peaks and remove crap ones
+
+NS.K4 <- res[which(res[,"NS_K4_rd.values.FDR"] <= 3e-8),]
+NS.K4.id <- intersect(NS.K4[which(!(is.na(NS.K4[,"NS_K4_rd.names"]))),"EnsemblID"],NS.K4[which(is.na(NS.K4[,"NS_K27_rd.names"])),"EnsemblID"])
+
+NS.K27 <- res[which(res[,"NS_K27_rd.values.FDR"] <= 3e-8),]
+NS.K27.id <- intersect(NS.K27[which(!(is.na(NS.K27[,"NS_K27_rd.names"]))),"EnsemblID"],NS.K27[which(is.na(NS.K27[,"NS_K4_rd.names"])),"EnsemblID"])
+
+N.K4 <- res[which(res[,"N_K4_rd.values.FDR"] <= 3e-8),]
+N.K4.id <- intersect(N.K4[which(!(is.na(N.K4[,"N_K4_rd.names"]))),"EnsemblID"],N.K4[which(is.na(N.K4[,"N_K27_rd.names"])),"EnsemblID"])
+
+N.K27 <- res[which(res[,"N_K27_rd.values.FDR"] <= 3e-8),]
+N.K27.id <- intersect(N.K27[which(!(is.na(N.K27[,"N_K27_rd.names"]))),"EnsemblID"],N.K27[which(is.na(N.K27[,"N_K4_rd.names"])),"EnsemblID"])
+
+NS.biv <- intersect(NS.K4[which(!(is.na(NS.K4[,"NS_K4_rd.names"]))),"EnsemblID"],NS.K27[which(!(is.na(NS.K27[,"NS_K27_rd.names"]))),"EnsemblID"])
+N.biv <- intersect(N.K4[which(!(is.na(N.K4[,"N_K4_rd.names"]))),"EnsemblID"],N.K27[which(!(is.na(N.K27[,"N_K27_rd.names"]))),"EnsemblID"])
+
+NS.neither <- intersect(res[which(is.na(res[,"NS_K4_rd.names"])),"EnsemblID"],res[which(is.na(res[,"NS_K27_rd.names"])),"EnsemblID"])
+N.neither <- intersect(res[which(is.na(res[,"N_K4_rd.names"])),"EnsemblID"],res[which(is.na(res[,"N_K27_rd.names"])),"EnsemblID"])
+
+
+
+####make table to export to Prism to draw boxplots of mods vs exp
+
+NS.K4.p <- res[which(res[,"EnsemblID"] %in% NS.K4.id), "NS.ave"]
+NS.K27.p <- res[which(res[,"EnsemblID"] %in% NS.K27.id), "NS.ave"]
+N.K4.p <- res[which(res[,"EnsemblID"] %in% N.K4.id), "N.ave"]
+N.K27.p <- res[which(res[,"EnsemblID"] %in% N.K27.id), "N.ave"]
+
+NS.biv.p <- res[which(res[,"EnsemblID"] %in% NS.biv), "NS.ave"]
+N.biv.p <- res[which(res[,"EnsemblID"] %in% N.biv), "N.ave"]
+
+NS.neither.p <- res[which(res[,"EnsemblID"] %in% NS.neither), "NS.ave"]
+N.neither.p <- res[which(res[,"EnsemblID"] %in% N.neither), "NS.ave"]
+
+write.csv(NS.K4.p, file = "results/prism_NSK4.csv")
+write.csv(NS.K27.p, file = "results/prism_NSK27.csv")
+write.csv(N.K4.p, file = "results/prism_NK4.csv")
+write.csv(N.K27.p, file = "results/prism_NK27.csv")
+
+write.csv(NS.biv.p, file = "results/prism_Nbiv.csv")
+write.csv(NS.biv.p, file = "results/prism_Nbiv.csv")
+
+write.csv(NS.neither.p, file = "results/prism_NSneither.csv")
+write.csv(NS.neither.p, file = "results/prism_Nneither.csv")
+
+###try and plot in R
+
+postscript(file = "results/gene_exp_vs_histone_boxplots.ps", horizontal = FALSE)
+boxplot(NS.K4.p, N.K4.p,NS.K27.p, N.K27.p,NS.biv.p, N.biv.p,NS.neither.p,N.neither.p,
+	outline = FALSE, 
+	notch = TRUE,
+	col = c("moccasin","lightsteelblue")
+	)
+dev.off()
+
+##massive wierd peak at Acvr1c - remove as distorting graph
+
+resa <- res[c(1:57,59:15374),]
+
+
+
+library(geneplotter)
+
+postscript(file = "results/gene_exp_vs_histone_mods.ps", horizontal = FALSE, paper = "special", width = 10, height = 10)
+par(mfrow=c(2,2), mar = c(4,4,1,1), oma = c(0.5,0.5,4,2))
+
+
+
+#mtext("Histone Modification vs Gene Expression in NS-TRB", 3,line = 2)
+
+smoothScatter(log2(resa[which(resa[,"EnsemblID"] %in% NS.K4.id),"NS_K4_rd.values.FoldEnrichment"]), resa[which(resa[,"EnsemblID"] %in% NS.K4.id),"NS.ave"], ylab = "Gene Expression Level", xlab = "", ylim = c(0,10),xlim = c(0,6), cex = 2, nrpoints = 20)
+
+smoothScatter(log2(resa[which(resa[,"EnsemblID"] %in% NS.K27.id),"NS_K27_rd.values.FoldEnrichment"]), resa[which(resa[,"EnsemblID"] %in% NS.K27.id),"NS.ave"], ylim = c(0,10), xlim = c(0,4), xlab = "", ylab = "", nrpoints = 20)
+
+
+smoothScatter(log2(resa[which(resa[,"EnsemblID"] %in% N.K4.id),"N_K4_rd.values.FoldEnrichment"]), resa[which(resa[,"EnsemblID"] %in% N.K4.id),"N.ave"], ylim = c(0,10), xlim = c(0,6), xlab = "H3K4me3 Enrichment", ylab = "Gene Expression Level", cex = 2, nrpoints = 20)
+
+smoothScatter(log2(resa[which(resa[,"EnsemblID"] %in% N.K27.id),"N_K27_rd.values.FoldEnrichment"]), resa[which(resa[,"EnsemblID"] %in% N.K27.id),"N.ave"], xlab = "H3K27me3 Enrichment", ylab = "", ylim = c(0,10), xlim = c(0,4), cex = 2, nrpoints = 20)
+
+mtext("Histone Modification vs Gene Expression", line = 1, col = "red", outer = TRUE, cex = 1.5)
+
+#mtext("Gene Expression Level", 2, line = 0.2, col = "blue")
+#mtext("H3K4me3 Enrichment", 1, line = 0.2, adj = -1, col = "blue")
+
+dev.off()
+
+
+
+
+######################################################################
+
+## take output from DeSeq of H3K27me3 loss during differentiation and plot versus change in gene expression
+
+peaks <- read.csv(file = "results/peak_compare.csv")
+
+exp <- read.csv(file = "results/bivalent_NS_genes.csv")
+
+biv_ns <- exp[order(abs(exp[,"logFC"]),decreasing = TRUE),]
+biv_ns <- biv_ns[!duplicated(biv_ns[,"NS_K27"]),]
+
+res <- merge(biv_ns,peaks, by.x = "NS_K27", by.y = "id")
+
+res <- res[,c(1,4,5,7,8,9,10,11,13,14,15,16,17)]
+
+res <- res[order(abs(res[,"log2FoldChange"]), decreasing = TRUE),]
+
+### for some wierd reason there's a few odd values - take these out for the time being...
+
+res <- res[4:610,]
+
+plot(res[,"log2FoldChange"],res[,"logFC"])
+
+library(hexbin)
+
+bin <- hexbin(res[,"log2FoldChange"],res[,"logFC"],xbins = 50)
+
+postscript(file = "results/bivalent_k27loss_hexbin.ps", horizontal = FALSE)
+
+plot(bin)
+
+dev.off()
+
+
+
+#####################################################################
+
+## make a heatmap of K4/K27 levels  - fold enrichment clustered. Something like MP Schnetz et al 2009 Genomic dist of CHD7 on chromatin
+
+options(stringsAsFactors = FALSE)
+
+results <- read.csv(file = "results/expression_histones_all.csv")
+
+##last row is maybe abit wrong - not annotated - remove
+
+results <- results[1:15373,]
+
+biv <- read.csv(file = "results/bivalent_NS_genes.csv")
+
+biv.ids <- biv[,"EnsemblID"]
+
+##maybe only take ones significantly changing expression - can then link back to expression changes as hist mods change = Markowetz 2010
+
+res.sig <- results[which(results[,"adj.P.Val"] <= 1),]
+
+res.change <- res.sig[which(abs(res.sig[,"logFC"]) >= 0),]
+
+#take neg10log10pval
+
+enrich <- res.change[,c(11,26,44,62,80)]
+
+rownames(enrich) <- res.change[,"EnsemblID"]
+colnames(enrich) <- c("logFC","NS_K4", "NS_K27", "N_K4", "N_K27")
+
+## need to turn NAs into zeros - might have to go back to raw data and pull in values without cutoffs??
+
+nonas <- apply(enrich,1, function(x){replace(x, is.na(x),0)})
+
+nonas <- t(nonas)
+
+##need to turn Inf into 0 too
+
+noinf <- apply(nonas,1, function(x){replace(x, which(x == "Inf"),0)})
+
+noinf <- t(noinf)
+
+##remove genes that are zero in all samples
+
+zero <- noinf[which(rowSums(noinf) > 1),]
+
+#and take bivalent genes in NSCs
+
+bivalent.res <- zero[which(rownames(zero) %in% biv.ids),]
+
+### scale to mean of each sample in original dataset
+
+mean_NS_K4 <- mean(zero[,"NS_K4"])
+
+bivalent.res[,"NS_K4"] <- bivalent.res[,"NS_K4"]/mean_NS_K4
+
+mean_NS_K27 <- mean(zero[,"NS_K27"])
+
+bivalent.res[,"NS_K27"] <- bivalent.res[,"NS_K27"]/mean_NS_K27
+
+mean_N_K4 <- mean(zero[,"N_K4"])
+
+bivalent.res[,"N_K4"] <- bivalent.res[,"N_K4"]/mean_N_K4
+
+mean_N_K27 <- mean(zero[,"N_K27"])
+
+bivalent.res[,"N_K27"] <- bivalent.res[,"N_K27"]/mean_N_K27
+
+## K27 values are now much bigger (bigger peaks?!) - increase relative to K27 by multiplying by following ratio:
+
+scale_NS <- mean(bivalent.res[,"NS_K27"]) / mean(bivalent.res[,"NS_K4"])
+scale_N  <- mean(bivalent.res[,"N_K27"]) / mean(bivalent.res[,"N_K4"])
+
+bivalent.res[,"NS_K4"] <- bivalent.res[,"NS_K4"] * scale_NS
+
+bivalent.res[,"N_K4"] <- bivalent.res[,"N_K4"] * scale_N
+
+
+## make own clustering to input to heatmap as can then pull out data to draw separate expression plots
+
+#bivalent.res <- bivalent.res[20:50,]
+
+#distance <- dist(bivalent.res[,2:5])
+#cluster <- hclust(distance, method = "ward")
+#dendrogram <- as.dendrogram(cluster)
+
+## then get order from dendrogram
+
+#dendro_order <- rev(order.dendrogram(dendrogram))
+
+#res_dendro <- bivalent.res[dendro_order,]
+
+# can now plot colour related to expression
+
+#exp.bar <- ifelse(res_dendro[,"logFC"] >= 1, "green","red")
+
+exp.bar <- ifelse(bivalent.res[,"logFC"] >= 1, "green","red")
+
+#put back in the same order as before
+
+#exp.bar.ord <- exp.bar[rownames(bivalent.res)]
+
+###actually dont need to do this - should work fine if take from original 
+
+
+heatmap(bivalent.res[,2:5], Colv = NA, Rowv = dendrogram, RowSideColors = exp.bar.ord)
+
+heatmap(bivalent.res[,2:5], Colv = NA, Rowv = dendrogram, labRow = NA, RowSideColors = exp.bar)
+
+
+
+
+##get raw expression data, average and then make side bars for NSCs and neurons
+
+library(beadarray)
+
+BSData <- get(load("../mla_neurons_lumixpn/results/BSData.quantile.RData"))
+
+E <- exprs(BSData)
+
+limma <- read.csv(file = "../mla_neurons_lumixpn/results/limma_results.csv")
+
+## remove duplicates
+
+limma.o <- limma[order(limma[,"adj.P.Val"],decreasing = FALSE),]
+limma.od <- limma.o[!duplicated(limma.o[,"EnsemblID"]),]
+
+E_limma <- merge(E, limma.od, by.x = "row.names", by.y = "ID")
+
+## tidy up and average
+
+E_limma <- E_limma[which(!(is.na(E_limma[,"EnsemblID"]))),]
+rownames(E_limma) <- E_limma[,"EnsemblID"]
+
+E_limma[,2] <- rowMeans(E_limma[,c(2:6)])
+E_limma[,7] <- rowMeans(E_limma[,c(7:9)])
+
+E_limma <- E_limma[,c("NSa","Na")]
+
+colnames(E_limma) <- c("NS_exp","N_exp")
+
+##then merge histone data to raw expression data
+
+hist_exp <- merge(bivalent.res, E_limma, by.x = "row.names", by.y = "row.names")
+
+rownames(hist_exp) <- hist_exp[,"Row.names"]
+
+hist_exp <- hist_exp[,2:8]
+
+#now redraw heatmap and add colour bars for expression level to side
+
+library(plotrix)
+
+## need to put on same scale - make NS_exp up to 12.68
+
+hist_exp_norm <- hist_exp
+hist_exp_norm[625,"NS_exp"] <- max(hist_exp_norm[,"N_exp"])
+
+## scale to a power to make more expressed genes more green
+
+hist_exp_norm[,"NS_exp"] <- log(hist_exp_norm[,"NS_exp"] ^ 7)
+hist_exp_norm[,"N_exp"] <- log(hist_exp_norm[,"N_exp"] ^ 7)
+
+exp.bar.scale_NS <- color.scale(hist_exp_norm[,"NS_exp"], c(215, 48, 39), c( 26,152,80),0)
+exp.bar.scale_NS <- exp.bar.scale_NS[1:624]
+
+exp.bar.scale_N <- color.scale(hist_exp_norm[,"N_exp"], c(215, 48, 39), c( 26,152,80),0)
+exp.bar.scale_N <- exp.bar.scale_N[1:624]
+
+hist_exp_norm <- hist_exp_norm[1:624,]
+
+heatmap.col <- color.scale(hist_exp_norm[,"NS_K4"], c(222, 235, 247), c(158, 202, 225),c(49, 130, 189))
+
+heatmap.col <- color.scale(hist_exp_norm[,"NS_K4"], c(100,0,0), c(0,100,0))
+
+library(gplots)
+
+symbol <- c("NSC K4me3", "NSC K27me3", "Neuron K4me3", "Neuron K4me3")
+
+library(RColorBrewer)
+
+postscript(file = "results/heatmap_exp_vs_hist_redgreen_colbar.eps", horizontal = FALSE)
+
+heatmap.2(as.matrix(hist_exp[,2:5]), 
+			Colv = NA, 
+			labRow = NA,
+			scale = "row",
+			density.info = "none",
+			trace = "none", 
+			RowSideColors = exp.bar.scale_N,
+			ColSideColors = colside, 
+			cexRow = 0.75,
+			labCol = symbol,
+			col = brewer.pal(3, "Blues"),
+			colsep = 1:4,
+			sepcolor = "white",
+			sepwidth = 0.1
+			)
+
+dev.off()
+
+
+
+brewer.pal(3, "Blues"),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+			
+library(beadarray)
+library(gplots)
+
+symbol <- c("NSC K4me3", "NSC K27me3", "Neuron K4me3", "Neuron K4me3")
+
+exp.bar <- ifelse(res[,"logFC"] >= 1, "green","red")
+
+postscript(file = "heatmap_hist_mods.ps", horizontal = FALSE)
+heatmap.2(zero[,2:5],
+		Colv=NA, 
+		scale="none",
+		key=TRUE,
+		keysize=0.75,
+		symkey=FALSE,
+		density.info="none",
+		trace="none", 
+		labRow=NULL,
+		labCol=symbol,
+		cexRow=0.75,
+		RowSideColors= exp.bar,
+	)			
+
+dev.off()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
